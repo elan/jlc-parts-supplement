@@ -1,0 +1,53 @@
+name: Update index
+
+on:
+  schedule:
+    # Weekly, at an unremarkable hour. The gap this fills doesn't churn daily, and a gentler
+    # cadence is easier to justify against an API that owes us nothing.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch catalog
+        run: python3 fetch.py --out build --workers 3 --throttle 0.4 --exclude-published
+      - name: Summarise
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          m = json.load(open("build/manifest.json"))
+          print(f"| | |\n|---|---|")
+          print(f"| parts published | {m['totalComponents']:,} |")
+          print(f"| already in jlcparts | {m['publishedCount']:,} |")
+          print(f"| shards | {len(m['shards'])} |")
+          print(f"| created | {m['created']} |")
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
